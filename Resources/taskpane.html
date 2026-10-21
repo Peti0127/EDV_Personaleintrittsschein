@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personaleintritt - EDV Formular</title>
+<!-- Office.js: required for the Outlook add-in (ignored when opened in a normal browser) -->
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="inner">
+    <img class="logo" src="Images/attensam-logo.png" alt="Attensam">
+    <div class="header-divider" aria-hidden="true"></div>
+    <div>
+      <h1>Personaleintritt - EDV Formular <span id="previewBadge" class="preview-badge" hidden>Vorschau: alle Felder</span></h1>
+      <p id="headerHint">Nach dem Ausfüllen entsteht eine E-Mail an edv@attensam.at mit dem Formular als PDF.</p>
+    </div>
+  </div>
+</header>
+
+<main id="formPage">
+  <form id="form" novalidate>
+    <div id="dynamic"></div>
+    <div id="empty" class="empty"></div>
+  </form>
+</main>
+
+<!-- Feedback page (opened with the "Feedback" button) -->
+<main id="feedbackPage" hidden>
+  <section class="section">
+    <div class="section-head">
+      <h2>Feedback</h2>
+      <p>Rückmeldung zum Formular. Ihre Eingaben im Formular bleiben erhalten.</p>
+    </div>
+    <div class="section-body">
+      <div class="field half" data-fb="typ">
+        <label for="fbTyp">Art<span class="req" aria-hidden="true">*</span></label>
+        <select id="fbTyp">
+          <option value="">Bitte wählen</option>
+          <option>Feedback</option>
+          <option>Fehlermeldung</option>
+          <option>Wunsch</option>
+        </select>
+        <div class="error-msg">Bitte eine Art auswählen.</div>
+      </div>
+      <div class="field" data-fb="text">
+        <label for="fbText">Nachricht<span class="req" aria-hidden="true">*</span></label>
+        <textarea id="fbText" class="big" maxlength="1200" placeholder="Was möchten Sie uns mitteilen?"></textarea>
+        <div class="hint"><span id="fbCount">0</span> / 1200 Zeichen</div>
+        <div class="error-msg">Bitte eine Nachricht eingeben.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="lightbox" id="lightbox" hidden>
+  <img alt="">
+  <button type="button" class="lightbox-close" aria-label="Schließen">×</button>
+</div>
+
+<div class="action-bar">
+  <div class="inner">
+    <span class="status" id="status" aria-live="polite"></span>
+    <button type="button" class="btn-secondary form-only" id="resetBtn">Zurücksetzen</button>
+    <button type="button" class="btn-secondary form-only" id="feedbackBtn">Feedback</button>
+    <button type="button" class="btn-primary form-only" id="mailBtn">E-Mail mit PDF erstellen</button>
+    <button type="button" class="btn-secondary fb-only" id="fbBackBtn" hidden>Zurück zum Formular</button>
+    <button type="button" class="btn-primary fb-only" id="fbSendBtn" hidden>Feedback senden</button>
+  </div>
+</div>
+
+<script src="lageplaene.js"></script>
+<script src="taskpane.js"></script>
+</body>
+</html>
