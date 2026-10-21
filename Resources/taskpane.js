@@ -1,3 +1,8 @@
+/* Outlook state (set in Office.onReady further below) */
+var IN_OUTLOOK = false;                 // running as Outlook add-in
+var SENDER = { name: "", email: "" };   // sender of the e-mail being written
+var PREVIEW = false;                    // secret preview, toggled by clicking the logo 5 times
+
 /* =================================================================
    FORM DEFINITION
    Each section has: id, title, (desc), showFor (Eintrittsarten), fields
@@ -283,6 +288,7 @@ const SECTIONS = [
     title: "Antragsteller:in",
     desc: "Wer stellt den Antrag?",
     always: true,
+    showIf: () => !IN_OUTLOOK,          // in Outlook the sender of the e-mail is used instead
     fields: [
       { name: "antrag_name", label: "Vor- und Nachname", type: "text", required: true, half: true,
         minWords: 2, placeholder: "z. B. Maria Muster" },
@@ -816,8 +822,13 @@ function visibleByName(name) {
 /* Secret preview: typing "SHOW ALL" as Antragsteller:in name reveals every section and field */
 const SHOW_ALL_CODE = "SHOW ALL";
 function showAll() {
+  if (PREVIEW) return true;
   const el = form.querySelector('[name="antrag_name"]');
   return !!el && el.value.trim() === SHOW_ALL_CODE;
+}
+/* Name of the person creating the request */
+function senderName() {
+  return IN_OUTLOOK ? (SENDER.name || SENDER.email) : getValue("antrag_name");
 }
 
 function fieldVisible(f) {
@@ -850,6 +861,7 @@ function neuComplete() {
 }
 
 function antragComplete() {
+  if (IN_OUTLOOK) return true;
   return fieldProblem(FIELD_MAP["antrag_name"]) === null && isValidEmail(getValue("antrag_email"));
 }
 
@@ -1224,7 +1236,7 @@ function buildBodyData() {
       }
     }
 
-    // Zugänge: ATT App → MdM, everything else → ServiceDesk
+    // Zugänge: all → ServiceDesk
     const zgSd = [], zgMdm = [];
     for (const z of (visibleByName("zugaenge") ? getValue("zugaenge") : [])) {
       if (z === "ASE") {
@@ -1234,14 +1246,14 @@ function buildBodyData() {
       if (z === "ELO") zgSd.push(`ELO: ${v("elo_rechte")}${v("elo_rechte") === "Schreiberechte" ? " (verursacht Lizenzkosten!)" : ""}`);
       if (z === "BMD") zgSd.push(`BMD: ${v("bmd_rechte")}${v("bmd_wie") ? ", Rechte wie " + v("bmd_wie") : ""}`);
       if (z === "RAT_2026") zgSd.push("RAT_2026 (Installation erst dann, wenn der User angemeldet ist!)");
-      if (z === "ATT App") zgMdm.push(v("att_rechte") === "Wie User"
+      if (z === "ATT App") zgSd.push(v("att_rechte") === "Wie User"
         ? `ATT App: Rechte wie ${v("att_wie")}`
         : `ATT App (${v("att_rechte")}): ${v("att_module").join(", ")}`);
     }
     if (zgSd.length) sd.push(["Zugänge", zgSd]);
     if (zgMdm.length) mdm.push(["Zugänge", zgMdm]);
 
-    const intro = [`Eintrittsschein von ${getValue("antrag_name")} vom ${todayAT()}`, "Alle Angaben siehe PDF im Anhang."];
+    const intro = [`Eintrittsschein von ${senderName()} vom ${todayAT()}`, "Alle Angaben siehe PDF im Anhang."];
 
     // Notes for the departments in Cc (same rules as buildCc)
     const person = [getValue("vorname"), getValue("nachname")].filter(Boolean).join(" ");
@@ -1323,7 +1335,7 @@ function buildPDF() {
   doc.text("Personaleintritt - EDV Formular", M, 13);
   doc.setFont("helvetica", "normal"); doc.setFontSize(10);
   doc.text("Eintrittsart: " + EINTRITTSART_LABELS[currentType()], M, 20);
-  doc.text("Erstellt am " + todayAT(), W - M, 20, { align: "right" });
+  doc.text(`Erstellt ${senderName() ? "von " + senderName() + " " : ""}am ${todayAT()}`, W - M, 20, { align: "right" });
   y = 38;
 
   const ensureSpace = h => { if (y + h > H - 20) { doc.addPage(); y = 20; } };
@@ -1471,15 +1483,25 @@ function runAction(action, doneMsg) {
    written: To, Cc, subject, to-do list and the PDF attachment.
    Opened in a normal browser it falls back to downloading an .eml file.
    ================================================================= */
-let IN_OUTLOOK = false;
 let insertedAttachmentId = null;   // PDF added by us, replaced on the next click
-let bodyInserted = false;          // to-do list already in the body
 
 const officeCall = fn => new Promise((resolve, reject) =>
   fn(res => res.status === Office.AsyncResultStatus.Succeeded ? resolve(res.value) : reject(res.error)));
 
+async function readSender() {
+  const mb = Office.context.mailbox, item = mb.item;
+  try {
+    if (item.from && item.from.getAsync) {
+      const f = await officeCall(cb => item.from.getAsync(cb));
+      if (f && (f.displayName || f.emailAddress)) { SENDER = { name: f.displayName, email: f.emailAddress }; return; }
+    }
+  } catch (e) { /* fall back to the signed-in user */ }
+  SENDER = { name: mb.userProfile.displayName, email: mb.userProfile.emailAddress };
+}
+
 async function fillOutlookEmail() {
   const item = Office.context.mailbox.item;
+  await readSender();                 // the From address may have been changed
   const pdfName = fileBaseName() + ".pdf";
   const pdfBase64 = buildPDF().output("datauristring").split(",")[1];
   const html = buildBodyHtml().replace(/^[\s\S]*<body[^>]*>|<\/body>[\s\S]*$/g, "");   // only the inner part
@@ -1488,15 +1510,9 @@ async function fillOutlookEmail() {
   await officeCall(cb => item.cc.setAsync(buildCc(), cb));
   await officeCall(cb => item.subject.setAsync(buildSubject(), cb));
 
-  const block = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:12pt">${html}</div><br>`;
-  if (!bodyInserted) {
-    // first time: put the to-do list above the existing content (keeps the signature)
-    await officeCall(cb => item.body.prependAsync(block, { coercionType: Office.CoercionType.Html }, cb));
-    bodyInserted = true;
-  } else {
-    // later clicks: replace the whole body with the updated list
-    await officeCall(cb => item.body.setAsync(block, { coercionType: Office.CoercionType.Html }, cb));
-  }
+  // replace the whole body: the e-mail contains only the form content (no signature)
+  const block = `<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:12pt">${html}</div>`;
+  await officeCall(cb => item.body.setAsync(block, { coercionType: Office.CoercionType.Html }, cb));
 
   if (insertedAttachmentId) {
     try { await officeCall(cb => item.removeAttachmentAsync(insertedAttachmentId, cb)); } catch (e) { /* already removed by the user */ }
@@ -1515,15 +1531,13 @@ async function onMailButton() {
     return;
   }
   const btn = document.getElementById("mailBtn");
-  const updating = bodyInserted;
+  const updating = !!insertedAttachmentId;
   btn.disabled = true;
   statusEl.classList.remove("error");
   statusEl.textContent = "E-Mail wird ausgefüllt …";
   try {
     await fillOutlookEmail();
-    statusEl.textContent = updating
-      ? "E-Mail aktualisiert. Bitte prüfen und ggf. die Signatur neu einfügen."
-      : "E-Mail ausgefüllt. Bitte prüfen und senden.";
+    statusEl.textContent = updating ? "E-Mail aktualisiert. Bitte prüfen und senden." : "E-Mail ausgefüllt. Bitte prüfen und senden.";
     btn.textContent = "E-Mail aktualisieren";
   } catch (err) {
     statusEl.textContent = "Fehler beim Ausfüllen der E-Mail: " + (err && err.message ? err.message : err);
@@ -1535,6 +1549,16 @@ async function onMailButton() {
 
 document.getElementById("mailBtn").addEventListener("click", onMailButton);
 
+/* Secret preview (all fields): click the Attensam logo 5 times within 3 seconds */
+(() => {
+  let clicks = [];
+  document.querySelector(".logo").addEventListener("click", () => {
+    const now = Date.now();
+    clicks = clicks.filter(t => now - t < 3000).concat(now);
+    if (clicks.length >= 5) { clicks = []; PREVIEW = !PREVIEW; updateVisibility(); }
+  });
+})();
+
 if (typeof Office !== "undefined" && Office.onReady) {
   Office.onReady(info => {
     if (info.host !== Office.HostType.Outlook || !Office.context.mailbox || !Office.context.mailbox.item) return;
@@ -1545,6 +1569,8 @@ if (typeof Office !== "undefined" && Office.onReady) {
     }
     IN_OUTLOOK = true;
     document.body.classList.add("in-outlook");
+    readSender().then(() => updateVisibility());
+    updateVisibility();
     document.getElementById("mailBtn").textContent = "In E-Mail übernehmen";
     document.getElementById("headerHint").textContent =
       "Füllt diese E-Mail aus: Empfänger, Betreff, To-Do-Liste und PDF im Anhang.";
