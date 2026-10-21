@@ -1569,6 +1569,7 @@ if (typeof Office !== "undefined" && Office.onReady) {
     }
     IN_OUTLOOK = true;
     document.body.classList.add("in-outlook");
+    applyTheme();
     readSender().then(() => updateVisibility());
     updateVisibility();
     document.getElementById("mailBtn").textContent = "In E-Mail übernehmen";
@@ -1644,3 +1645,39 @@ document.getElementById("resetBtn").addEventListener("click", () => {
   statusEl.textContent = "";
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
+
+/* =================================================================
+   DESIGN: Auto / Hell / Grau / Dunkel
+   Auto follows the Outlook theme (in the add-in) or the system setting.
+   The choice is remembered in this browser / Outlook.
+   ================================================================= */
+const THEME_KEY = "personaleintritt-theme";
+function themeChoice() {
+  try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (e) { return "auto"; }
+}
+function autoTheme() {
+  try {
+    const bg = (typeof Office !== "undefined" && Office.context && Office.context.officeTheme)
+      ? Office.context.officeTheme.bodyBackgroundColor : null;
+    if (bg) {
+      const n = parseInt(bg.replace("#", ""), 16);
+      const lum = (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255;
+      return lum > 0.7 ? "light" : lum > 0.2 ? "gray" : "dark";
+    }
+  } catch (e) { /* no Office theme available */ }
+  return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function applyTheme() {
+  const choice = themeChoice();
+  const theme = choice === "auto" ? autoTheme() : choice;
+  if (theme === "light") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", theme);
+  document.querySelectorAll("[data-theme-choice]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.themeChoice === choice)));
+}
+document.querySelectorAll("[data-theme-choice]").forEach(b => b.addEventListener("click", () => {
+  try { localStorage.setItem(THEME_KEY, b.dataset.themeChoice); } catch (e) { /* storage blocked */ }
+  applyTheme();
+}));
+if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+applyTheme();
